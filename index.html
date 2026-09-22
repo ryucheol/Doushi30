@@ -245,6 +245,7 @@ tr.done td.j{color:var(--matsu)}
     <button class="chip" data-mode="group" aria-pressed="false">분류</button>
     <button class="chip" data-mode="mean" aria-pressed="false">뜻</button>
     <button class="chip" data-mode="ko2jp" aria-pressed="false">뜻→동사</button>
+    <button class="chip" data-mode="jp2ko" aria-pressed="false">일본어→한국어</button>
   </div>
   <div class="row">
     <span>범위</span>
@@ -319,9 +320,55 @@ const V=[
  {s:6,k:"始める",r:"はじめる",m:"시작하다",g:1,e:"",te:"始めて",ta:"始めた",nai:"始めない",ms:"始めます",trap:"자동사 짝 始まる(はじまる)"},
  {s:6,k:"終わる",r:"おわる",m:"끝나다",g:5,e:"る",te:"終わって",ta:"終わった",nai:"終わらない",ms:"終わります",rule:"촉음편"}
 ];
+
+/* Korean renderings: b=기본형 m=~습니다 p=과거 */
+const KO={
+ "ある":{b:"있다",m:"있습니다",p:"있었다",noTeiru:true},
+ "いる":{b:"있다",m:"있습니다",p:"있었다",noTeiru:true},
+ "なる":{b:"되다",m:"됩니다",p:"되었다",ti:"되어 있습니다"},
+ "する":{b:"하다",m:"합니다",p:"했다"},
+ "分かる":{b:"알다",m:"압니다",p:"알았다",ti:"알고 있습니다"},
+ "行く":{b:"가다",m:"갑니다",p:"갔다",ti:"가 있습니다"},
+ "来る":{b:"오다",m:"옵니다",p:"왔다",ti:"와 있습니다"},
+ "帰る":{b:"돌아가다",m:"돌아갑니다",p:"돌아갔다",ti:"돌아가 있습니다"},
+ "出る":{b:"나가다",m:"나갑니다",p:"나갔다",ti:"나가 있습니다"},
+ "入る":{b:"들어가다",m:"들어갑니다",p:"들어갔다",ti:"들어가 있습니다"},
+ "見る":{b:"보다",m:"봅니다",p:"봤다"},
+ "聞く":{b:"듣다",m:"듣습니다",p:"들었다"},
+ "言う":{b:"말하다",m:"말합니다",p:"말했다"},
+ "話す":{b:"이야기하다",m:"이야기합니다",p:"이야기했다"},
+ "思う":{b:"생각하다",m:"생각합니다",p:"생각했다"},
+ "取る":{b:"잡다",m:"잡습니다",p:"잡았다"},
+ "持つ":{b:"들다",m:"듭니다",p:"들었다"},
+ "作る":{b:"만들다",m:"만듭니다",p:"만들었다"},
+ "使う":{b:"사용하다",m:"사용합니다",p:"사용했다"},
+ "買う":{b:"사다",m:"삽니다",p:"샀다"},
+ "食べる":{b:"먹다",m:"먹습니다",p:"먹었다"},
+ "飲む":{b:"마시다",m:"마십니다",p:"마셨다"},
+ "書く":{b:"쓰다",m:"씁니다",p:"썼다"},
+ "読む":{b:"읽다",m:"읽습니다",p:"읽었다"},
+ "待つ":{b:"기다리다",m:"기다립니다",p:"기다렸다"},
+ "乗る":{b:"타다",m:"탑니다",p:"탔다"},
+ "開ける":{b:"열다",m:"엽니다",p:"열었다"},
+ "閉める":{b:"닫다",m:"닫습니다",p:"닫았다"},
+ "始める":{b:"시작하다",m:"시작합니다",p:"시작했다"},
+ "終わる":{b:"끝나다",m:"끝납니다",p:"끝났다",ti:"끝나 있습니다"}
+};
+const stem=b=>b.replace(/다$/,"");
+/* which Japanese forms the 読解 mode draws from */
+const FORMS=[
+ {id:"dic",  label:"사전형",       jp:v=>v.k,            rd:v=>v.r,               ko:v=>KO[v.k].b},
+ {id:"masu", label:"ます형",       jp:v=>v.ms,           rd:v=>kana(v,"masu"),    ko:v=>KO[v.k].m},
+ {id:"nai",  label:"ない형",       jp:v=>v.nai,          rd:v=>kana(v,"nai"),     ko:v=>stem(KO[v.k].b)+"지 않다"},
+ {id:"te",   label:"て형",         jp:v=>v.te,           rd:v=>kana(v,"te"),      ko:v=>stem(KO[v.k].b)+"고"},
+ {id:"ta",   label:"た형 (과거)",  jp:v=>v.ta,           rd:v=>kana(v,"ta"),      ko:v=>KO[v.k].p},
+ {id:"teiru",label:"~ています",    jp:v=>v.te+"います",  rd:v=>kana(v,"te")+"います", ko:v=>KO[v.k].ti||stem(KO[v.k].b)+"고 있습니다"}
+];
+let curForm=null;
+
 const GN={5:"5단",1:"1단",0:"불규칙"};
 const SETN={0:"전체 30",1:"존재·변화",2:"이동",3:"지각·사고",4:"손동작",5:"생활",6:"답사"};
-const MODEN={te:"て형",ta:"た형",nai:"ない형",teiru:"~하고 있다",group:"분류",mean:"뜻",ko2jp:"뜻→동사"};
+const MODEN={te:"て형",ta:"た형",nai:"ない형",teiru:"~하고 있다",group:"분류",mean:"뜻",ko2jp:"뜻→동사",jp2ko:"일본어→한국어"};
 
 /* ═══ state ═══ */
 let mode="te", setF=0, queue=[], qi=0, shown=false;
@@ -335,10 +382,13 @@ function save(){
 
 /* ═══ queue ═══ */
 function pool(){
+  const base=(()=>{
   if(setF===-1) return V.filter(v=>v.trap);
-  if(setF===-2){ const w=V.filter(v=>(st[v.k]?.ng||0)>0); return w.length?w:V.slice(); }
-  if(setF===0) return V.slice();
-  return V.filter(v=>v.s===setF);
+    if(setF===-2){ const w=V.filter(v=>(st[v.k]?.ng||0)>0); return w.length?w:V.slice(); }
+    if(setF===0) return V.slice();
+    return V.filter(v=>v.s===setF);
+  })();
+  return mode==="teiru" ? base.filter(v=>!KO[v.k].noTeiru) : base;
 }
 function weight(v){
   const a=st[v.k]||{ok:0,ng:0};
@@ -370,12 +420,18 @@ function draw(){
   $("prompt").textContent = {
     te:"이 동사의 て형은?", ta:"이 동사의 た형(과거)은?", nai:"이 동사의 ない형(부정)은?",
     teiru:"「~하고 있습니다」로", group:"5단 · 1단 · 불규칙 중 무엇?",
-    mean:"뜻은?", ko2jp:"이 뜻의 동사를 일본어로"
+    mean:"뜻은?", ko2jp:"이 뜻의 동사를 일본어로", jp2ko:"이 형태를 한국어로"
   }[mode];
 
   // glyph cells
   const gw=$("glyphs"); gw.innerHTML="";
-  if(askJP){
+  if(mode==="jp2ko"){
+    const pool=FORMS.filter(f=>!(f.id==="teiru"&&KO[v.k].noTeiru));
+    curForm=pool[Math.floor(Math.random()*pool.length)];
+    const d=document.createElement("div");
+    d.className="gc jp";d.style.width="auto";d.style.padding="0 20px";d.style.fontSize="34px";
+    d.textContent=curForm.jp(v); gw.appendChild(d);
+  }else if(askJP){
     const ch=[...v.k];
     const isolate = v.g===5 && v.e;
     ch.forEach((c,i)=>{
@@ -390,8 +446,8 @@ function draw(){
     d.textContent=v.m; gw.appendChild(d);
   }
 
-  $("kana").textContent = askJP ? v.r : "";
-  $("gloss").textContent = (mode==="mean"||mode==="ko2jp") ? "" : v.m;
+  $("kana").textContent = mode==="jp2ko" ? curForm.rd(v) : (askJP ? v.r : "");
+  $("gloss").textContent = (mode==="mean"||mode==="ko2jp"||mode==="jp2ko") ? "" : v.m;
 
   $("slot").innerHTML='<span class="hidden">머릿속으로 만든 뒤 확인하십시오</span>';
   $("acts").innerHTML='<button class="big reveal" id="btnReveal">확인</button>';
@@ -415,13 +471,14 @@ function reveal(){
   else if(mode==="group"){a=GN[v.g];sub="";}
   else if(mode==="mean"){a=v.m;sub=v.r;}
   else if(mode==="ko2jp"){a=v.k;sub=v.r;}
+  else if(mode==="jp2ko"){a=curForm.ko(v);sub=curForm.label+" · "+v.k+"("+v.r+")";}
 
   const s=$("slot");
   s.innerHTML="";
   const p=document.createElement("p");
-  p.className="answer "+(mode==="group"||mode==="mean"?"":"jp ")+(ex?"ex":"ok");
-  if(mode==="group"||mode==="mean") p.style.fontFamily='"Noto Sans KR",sans-serif';
-  if(mode==="group"||mode==="mean") p.style.fontSize="26px";
+  const koAns=(mode==="group"||mode==="mean"||mode==="jp2ko");
+  p.className="answer "+(koAns?"":"jp ")+(ex?"ex":"ok");
+  if(koAns){ p.style.fontFamily='"Noto Sans KR",sans-serif'; p.style.fontSize="26px"; }
   p.textContent=a;
   if(sub){const sm=document.createElement("small");sm.className="jp";sm.textContent=sub;p.appendChild(sm);}
   s.appendChild(p);
@@ -455,12 +512,18 @@ function reveal(){
 }
 
 function kana(v,f){
-  // reading-only version of the answer (rough: swap kanji stem for kana stem)
   const base=v.r;
-  if(v.g===1){ const stem=base.slice(0,-1); return stem+(f==="te"?"て":f==="ta"?"た":"ない"); }
+  if(f==="masu"){
+    if(v.g===1) return base.slice(0,-1)+"ます";
+    if(v.g===0) return v.k==="する"?"します":"きます";
+    // 5단: u단→i단 + ます
+    const map={"う":"い","く":"き","ぐ":"ぎ","す":"し","つ":"ち","ぬ":"に","ぶ":"び","む":"み","る":"り"};
+    return base.slice(0,-1)+map[base.slice(-1)]+"ます";
+  }
+  if(v.g===1){ const st=base.slice(0,-1); return st+(f==="te"?"て":f==="ta"?"た":"ない"); }
   if(v.g===0){ return v.k==="する"?({te:"して",ta:"した",nai:"しない"})[f]:({te:"きて",ta:"きた",nai:"こない"})[f]; }
-  const stem=base.slice(0,-1), tail=v[f].slice(v.k.length-1);
-  return stem+tail;
+  const st=base.slice(0,-1), tail=v[f].slice(v.k.length-1);
+  return st+tail;
 }
 
 function grade(good){
